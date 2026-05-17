@@ -1,0 +1,27 @@
+# --- Fichiers Cryptographiques Sensibles ---
+# Clés privées, CSR et Certificats de test locaux
+*.pem
+*.key
+*.crt
+*.csr
+
+# Stockage temporaire du serveur et du client
+server/server_storage/*
+!server/server_storage/.gitkeep
+client/document_confidentiel.txt
+client/document_confidentiel.txt.enc
+client/restaure_fichier.txt
+*.enc
+
+# --- Caches Python & Streamlit ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.streamlit/
+.ipynb_checkpoints/
+
+# --- Caches OS ---
+.DS_Store
+Thumbs.db
