@@ -434,20 +434,25 @@ with tab_pki:
         ca_org = st.text_input("Organisation (O)", value="My Security Laboratory", key="ca_org_input")
         ca_country = st.text_input("Pays (C)", value="FR", max_chars=2, key="ca_c_input")
         ca_days = st.number_input("Validité de la Root CA (jours)", value=365, min_value=1, key="ca_validity_input")
+        ca_password = st.text_input("Définir un mot de passe fort pour la Root CA", type="password", key="ca_password_setup_pki", help="Utilisé pour chiffrer la clé privée de l'autorité racine via KDF.")
         
         if st.button("✨ Générer la Root CA", key="gen_root_ca_btn"):
-            try:
-                selected_curve = get_curve_by_name(curve_name)
-                ca_priv = generate_ecc_private_key(selected_curve)
-                ca_cert = generate_root_ca_ecc(
-                    ca_priv, ca_country, "IDF", "Paris", ca_org, ca_cn, ca_days
-                )
-                
-                ca_priv_pem = ca_priv.private_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PrivateFormat.PKCS8,
-                    encryption_algorithm=serialization.NoEncryption()
-                )
+            if len(ca_password) < 8:
+                st.error("❌ Erreur : Le mot de passe de la Root CA doit faire au moins 8 caractères pour être sécurisé via KDF !")
+            else:
+                try:
+                    selected_curve = get_curve_by_name(curve_name)
+                    ca_priv = generate_ecc_private_key(selected_curve)
+                    ca_cert = generate_root_ca_ecc(
+                        ca_priv, ca_country, "IDF", "Paris", ca_org, ca_cn, ca_days
+                    )
+                    
+                    password_bytes = ca_password.encode("utf-8")
+                    ca_priv_pem = ca_priv.private_bytes(
+                        encoding=serialization.Encoding.PEM,
+                        format=serialization.PrivateFormat.PKCS8,
+                        encryption_algorithm=serialization.BestAvailableEncryption(password_bytes)
+                    )
                 ca_cert_pem = ca_cert.public_bytes(serialization.Encoding.PEM)
                 
                 with open("ca_private_key.pem", "wb") as f:
@@ -472,14 +477,18 @@ with tab_pki:
         st.write("Génère une clé serveur ECC et crée un certificat signé par la Root CA locale active.")
         server_cn = st.text_input("Common Name du Serveur (ex: localhost ou 127.0.0.1)", value="localhost", key="serv_cn_input")
         server_days = st.number_input("Validité du Certificat Serveur (jours)", value=30, min_value=1, key="serv_days_input")
+        ca_decrypt_password = st.text_input("Saisir le mot de passe de la Root CA active", type="password", key="ca_password_decrypt_pki", help="Nécessaire pour déverrouiller la clé privée de la CA et signer le certificat serveur.")
         
         if st.button("✍️ Signer le Certificat Serveur", key="sign_serv_cert_btn"):
             if not os.path.exists("ca_cert.pem") or not os.path.exists("ca_private_key.pem"):
                 st.error("❌ Erreur : Vous devez d'abord générer la Root CA (étape 1) pour pouvoir signer !")
+            elif not ca_decrypt_password:
+                st.error("❌ Erreur : Veuillez entrer le mot de passe pour déverrouiller la Root CA active !")
             else:
                 try:
                     with open("ca_private_key.pem", "rb") as f:
-                        ca_priv = serialization.load_pem_private_key(f.read(), password=None)
+                        password_bytes = ca_decrypt_password.encode("utf-8")
+                        ca_priv = serialization.load_pem_private_key(f.read(), password=password_bytes)
                     with open("ca_cert.pem", "rb") as f:
                         ca_cert = x509.load_pem_x509_certificate(f.read())
                         

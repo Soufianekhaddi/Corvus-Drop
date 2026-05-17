@@ -275,12 +275,25 @@ def main():
         # Étape 3 : Exportation au format PEM
         print("\n--- ÉTAPE 3 : EXPORTATION ET SÉCURISATION DES FICHIERS PEM ---")
         
-        # Sérialisation des clés privées (sans chiffrement par mot de passe pour le test local de développement,
-        # mais dans un cadre de production, un mot de passe est obligatoire pour la clé CA).
+        # Chiffrement par mot de passe de la clé privée de l'autorité racine (Root CA) via KDF robuste
+        import getpass
+        print("\n[+] SÉCURISATION DE LA CA RACINE (Chiffrement de la Clé Privée par KDF)")
+        while True:
+            password = getpass.getpass("Définissez un mot de passe fort pour chiffrer la clé privée de la Root CA : ")
+            if len(password) < 8:
+                print("[!] Le mot de passe doit faire au moins 8 caractères.")
+                continue
+            confirm = getpass.getpass("Confirmez le mot de passe : ")
+            if password != confirm:
+                print("[!] Les mots de passe ne correspondent pas. Réessayez.")
+                continue
+            break
+
+        password_bytes = password.encode("utf-8")
         ca_private_pem = ca_private_key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption()
+            encryption_algorithm=serialization.BestAvailableEncryption(password_bytes)
         )
         
         server_private_pem = server_private_key.private_bytes(
