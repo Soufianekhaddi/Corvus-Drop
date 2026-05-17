@@ -1,31 +1,41 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Système d'Échange de Fichiers Sécurisé - Interface Graphique Premium avec PKI ECC & Inspecteur HTTPS Réel
-====================================================================================================
-
+🛡️ Corvus Drop - Interface Graphique Premium avec PKI ECC & Inspecteur HTTPS Réel
+===================================================================================
 Cette interface centralisée propose :
-1. Un inspecteur HTTPS réel pour n'importe quel site internet (TLS Handshake & Analyse X.509).
+1. Un inspecteur HTTPS réel pour n'importe quel site internet (Handshake TLS standard & Analyse SSL).
 2. Un guide et outil d'intégration pour un "Vrai HTTPS" local sans avertissement de sécurité.
-3. Un simulateur de PKI asymétrique ECC (Root CA, CSR, signature de certificats).
-4. La gestion de clé symétrique ChaCha20 et l'envoi/réception de fichiers chiffrés par API HTTPS.
+3. Un simulateur de PKI asymétrique ECC (Root CA, signature de certificats customisés) codé de A à Z.
+4. La gestion de clé symétrique ChaCha20 de bout en bout.
+5. L'envoi/réception de fichiers chiffrés via l'API HTTP locale.
 
-Auteur: Ingénieur Sécurité & Cryptographie
+Auteur: Développeur Sécurité & Cryptographie Expert - Corvus Drop
 """
 
 import os
-import ipaddress
-import datetime
+import json
 import socket
 import ssl
+import datetime
 import requests
 import streamlit as st
-from cryptography import x509
-from cryptography.x509.oid import NameOID
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms
+
+# Importation de notre bibliothèque cryptographique FROM SCRATCH
+from custom_crypto import (
+    chacha20_encrypt,
+    chacha20_decrypt,
+    serialize_custom_private_key,
+    deserialize_custom_private_key,
+    serialize_custom_public_key,
+    deserialize_custom_public_key,
+    create_custom_certificate,
+    verify_custom_certificate,
+    ecc_mult,
+    G,
+    P_256_N,
+    ECCPoint
+)
 
 # Configuration de la page Streamlit
 st.set_page_config(
@@ -128,9 +138,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Configuration générale
-SERVER_URL = "https://localhost:8443"
+SERVER_URL = "http://localhost:8080"
 CA_CERT_PATH = "ca_cert.pem"
-NONCE_SIZE = 16
+NONCE_SIZE = 12  # Nonce ChaCha20 IETF (12 octets)
 KEY_SIZE = 32
 
 # Initialisation de la session Streamlit
@@ -139,108 +149,28 @@ if "chacha_key" not in st.session_state:
 
 # ---- Fonctions Cryptographiques ECC (PKI) ----
 
-def get_curve_by_name(name: str):
-    curves = {
-        "SECP384R1 (NIST P-384)": ec.SECP384R1(),
-        "SECP256R1 (NIST P-256)": ec.SECP256R1(),
-        "SECP521R1 (NIST P-521)": ec.SECP521R1()
-    }
-    return curves.get(name, ec.SECP384R1())
+def generate_ecc_private_key():
+    private_key = int.from_bytes(os.urandom(32), "big") % P_256_N
+    if private_key == 0:
+        private_key = 1
+    return private_key
 
-
-def generate_ecc_private_key(curve):
-    return ec.generate_private_key(curve)
-
-
-def generate_root_ca_ecc(private_key, country, state, locality, org, common_name, days_valid):
-    subject = issuer = x509.Name([
-        x509.NameAttribute(NameOID.COUNTRY_NAME, country),
-        x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, state),
-        x509.NameAttribute(NameOID.LOCALITY_NAME, locality),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, org),
-        x509.NameAttribute(NameOID.COMMON_NAME, common_name),
-    ])
-
-    now = datetime.datetime.now(datetime.timezone.utc)
-    cert = (
-        x509.CertificateBuilder()
-        .subject_name(subject)
-        .issuer_name(issuer)
-        .public_key(private_key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(now)
-        .not_valid_after(now + datetime.timedelta(days=days_valid))
-        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-        .add_extension(
-            x509.KeyUsage(
-                digital_signature=True,
-                content_commitment=False,
-                key_encipherment=False,
-                data_encipherment=False,
-                key_agreement=False,
-                key_cert_sign=True,
-                crl_sign=True,
-                encipher_only=False,
-                decipher_only=False,
-            ),
-            critical=True,
-        )
-        .add_extension(x509.SubjectKeyIdentifier.from_public_key(private_key.public_key()), critical=False)
-        .sign(private_key, hashes.SHA384())
-    )
+def generate_root_ca_ecc(private_key, common_name, days_valid):
+    public_key = ecc_mult(private_key, G)
+    cert = create_custom_certificate(common_name, common_name, days_valid, public_key, private_key)
     return cert
 
-
-def generate_and_sign_server_cert_ecc(
-    server_private_key, ca_cert, ca_private_key, common_name, days_valid
-):
-    subject = x509.Name([
-        x509.NameAttribute(NameOID.COUNTRY_NAME, "FR"),
-        x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "IDF"),
-        x509.NameAttribute(NameOID.LOCALITY_NAME, "Paris"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Secure File Exchange Co"),
-        x509.NameAttribute(NameOID.COMMON_NAME, common_name),
-    ])
-
-    now = datetime.datetime.now(datetime.timezone.utc)
-    
-    san_list = [x509.DNSName("localhost")]
+def generate_and_sign_server_cert_ecc(server_private_key, ca_cert_pem, ca_private_key, common_name, days_valid):
     try:
-        ip_addr = ipaddress.ip_address(common_name)
-        san_list.append(x509.IPAddress(ip_addr))
-    except ValueError:
-        if common_name != "localhost":
-            san_list.append(x509.DNSName(common_name))
-
-    cert = (
-        x509.CertificateBuilder()
-        .subject_name(subject)
-        .issuer_name(ca_cert.subject)
-        .public_key(server_private_key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(now)
-        .not_valid_after(now + datetime.timedelta(days=days_valid))
-        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-        .add_extension(
-            x509.KeyUsage(
-                digital_signature=True,
-                content_commitment=False,
-                key_encipherment=True,
-                data_encipherment=False,
-                key_agreement=True,
-                key_cert_sign=False,
-                crl_sign=False,
-                encipher_only=False,
-                decipher_only=False,
-            ),
-            critical=True,
-        )
-        .add_extension(x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
-        .add_extension(x509.SubjectAlternativeName(san_list), critical=False)
-        .add_extension(x509.SubjectKeyIdentifier.from_public_key(server_private_key.public_key()), critical=False)
-        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_cert.public_key()), critical=False)
-        .sign(ca_private_key, hashes.SHA384())
-    )
+        lines = ca_cert_pem.strip().split("\n")
+        body_json = "".join([l for l in lines if not l.startswith("-----")])
+        ca_data = json.loads(body_json)
+        issuer_cn = ca_data["subject"]["CN"]
+    except Exception:
+        issuer_cn = "Local ECC Root CA"
+        
+    server_public_key = ecc_mult(server_private_key, G)
+    cert = create_custom_certificate(common_name, issuer_cn, days_valid, server_public_key, ca_private_key)
     return cert
 
 # ---- Fonctions Cryptographiques ChaCha20 ----
@@ -248,51 +178,34 @@ def generate_and_sign_server_cert_ecc(
 def generate_key_256() -> bytes:
     return os.urandom(KEY_SIZE)
 
-
 def encrypt_in_memory(data: bytes, key: bytes) -> bytes:
     nonce = os.urandom(NONCE_SIZE)
-    algorithm = algorithms.ChaCha20(key, nonce)
-    encryptor = Cipher(algorithm, mode=None).encryptor()
-    ciphertext = encryptor.update(data) + encryptor.finalize()
+    ciphertext = chacha20_encrypt(data, key, nonce)
     return nonce + ciphertext
-
 
 def decrypt_in_memory(encrypted_data: bytes, key: bytes) -> bytes:
     if len(encrypted_data) < NONCE_SIZE:
         raise ValueError("Données trop courtes.")
     nonce = encrypted_data[:NONCE_SIZE]
     ciphertext = encrypted_data[NONCE_SIZE:]
-    algorithm = algorithms.ChaCha20(key, nonce)
-    decryptor = Cipher(algorithm, mode=None).decryptor()
-    return decryptor.update(ciphertext) + decryptor.finalize()
+    return chacha20_decrypt(ciphertext, key, nonce)
 
+# ---- Fonction Inspecteur HTTPS Réel (Standard Socket TLS sans cryptography) ----
 
-# ---- Fonction Inspecteur HTTPS Réel (TLS socket connection) ----
-
-def fetch_live_https_certificate(domain: str):
-    """
-    Se connecte à un domaine distant sur le port 443 via TLS
-    et récupère le certificat HTTPS actif sous forme d'objet cryptography.
-    """
+def fetch_live_https_certificate(domain: str) -> dict:
     clean_domain = domain.strip().replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
-    
-    # Configuration du contexte SSL standard pour récupérer le certificat distant
     ssl_context = ssl.create_default_context()
-    
-    # On n'impose pas la validation de CA sur notre inspecteur pour lui permettre de lire également 
-    # des certificats auto-signés ou expirés afin que l'utilisateur puisse les analyser !
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
     
     with socket.create_connection((clean_domain, 443), timeout=5) as sock:
         with ssl_context.wrap_socket(sock, server_hostname=clean_domain) as ssock:
-            der_cert = ssock.getpeercert(binary_form=True)
-            return x509.load_der_x509_certificate(der_cert)
-
+            cert_dict = ssock.getpeercert(binary_form=False)
+            return cert_dict
 
 # ---- En-tête Global ----
 st.markdown('<h1 class="cyber-title">🛡️ Corvus Drop - Secure PKI & HTTPS Lab</h1>', unsafe_allow_html=True)
-st.markdown('<p class="cyber-subtitle">Corvus Drop - Analyseur HTTPS Réel, Simulateur PKI ECC & Chiffrement ChaCha20</p>', unsafe_allow_html=True)
+st.markdown('<p class="cyber-subtitle">Corvus Drop - Outils de cryptographie avancés 100% développés FROM SCRATCH</p>', unsafe_allow_html=True)
 
 # Barre d'onglets principale
 tab_live_https, tab_pki, tab_key, tab_upload, tab_download = st.tabs([
@@ -302,7 +215,6 @@ tab_live_https, tab_pki, tab_key, tab_upload, tab_download = st.tabs([
     "📤 Envoyer un Fichier (Upload)",
     "📥 Recevoir un Fichier (Download)"
 ])
-
 
 # ================= ONGLET 1 : INSPECTEUR HTTPS RÉEL & CONFIANCE =================
 with tab_live_https:
@@ -314,7 +226,7 @@ with tab_live_https:
         st.markdown('<h3 class="section-header">🌐 Inspecteur de Certificat HTTPS Réel</h3>', unsafe_allow_html=True)
         st.write(
             "Entrez l'adresse de n'importe quel site internet sécurisé pour effectuer une négociation TLS (Handshake) "
-            "en temps réel, récupérer son certificat de sécurité X.509 officiel et l'analyser cryptographiquement."
+            "en temps réel, récupérer son certificat X.509 standard et analyser sa structure de sécurité."
         )
         
         target_domain = st.text_input(
@@ -328,85 +240,41 @@ with tab_live_https:
             else:
                 try:
                     with st.spinner(f"Connexion TLS en cours sur {target_domain}..."):
-                        cert = fetch_live_https_certificate(target_domain)
+                        cert_dict = fetch_live_https_certificate(target_domain)
                         
                         st.success(f"🔒 Connexion TLS établie ! Certificat de {target_domain} récupéré avec succès.")
                         
                         # Affichage des métadonnées
                         st.markdown("##### 📋 Identité du Certificat")
-                        st.write(f"**Sujet (Subject) :** `{cert.subject.rfc4514_string()}`")
-                        st.write(f"**Émetteur (Issuer / CA) :** `{cert.issuer.rfc4514_string()}`")
-                        st.write(f"**Numéro de Série :** `{cert.serial_number}`")
+                        
+                        subject_formatted = ", ".join([f"{k}={v}" for item in cert_dict.get("subject", []) for k, v in item])
+                        issuer_formatted = ", ".join([f"{k}={v}" for item in cert_dict.get("issuer", []) for k, v in item])
+                        
+                        st.write(f"**Sujet (Subject) :** `{subject_formatted}`")
+                        st.write(f"**Émetteur (Issuer / CA) :** `{issuer_formatted}`")
+                        st.write(f"**Numéro de Série :** `{cert_dict.get('serialNumber')}`")
                         
                         # Calcul validité
-                        now_utc = datetime.datetime.now(datetime.timezone.utc)
-                        valid_from = cert.not_valid_before_utc
-                        valid_to = cert.not_valid_after_utc
-                        days_left = (valid_to - now_utc).days
-                        
                         st.markdown("##### ⌛ Validité")
-                        st.write(f"Actif depuis le : `{valid_from}`")
-                        st.write(f"Expire le : `{valid_to}`")
-                        
-                        if days_left > 0:
-                            st.info(f"🟢 Certificat valide pour encore **{days_left} jours**.")
-                        else:
-                            st.error(f"🔴 Certificat EXPIRÉ depuis {-days_left} jours !")
-                            
-                        # Clé publique
-                        pub_key = cert.public_key()
-                        st.markdown("##### 🔑 Clé Publique Asymétrique")
-                        if isinstance(pub_key, ec.EllipticCurvePublicKey):
-                            st.success(f"Courbe Elliptique (ECC) : `{pub_key.curve.name}` ({pub_key.key_size} bits)")
-                            numbers = pub_key.public_numbers()
-                            st.code(f"Point Public X: {hex(numbers.x)}\nPoint Public Y: {hex(numbers.y)}", language="text")
-                        elif hasattr(pub_key, "n"):  # RSA
-                            st.warning(f"Algorithme Classique : RSA ({pub_key.key_size} bits)")
-                            st.code(f"Modulus (N): {hex(pub_key.public_numbers().n)[:120]}...", language="text")
-                        else:
-                            st.write(f"Type de clé inconnu : {type(pub_key)}")
-                            
-                        # Signature
-                        st.markdown("##### ✍️ Signature Numérique")
-                        st.write(f"Algorithme de hachage de signature : `{cert.signature_hash_algorithm.name}`")
-                        st.code(f"Signature hex : {cert.signature.hex()[:80]}...", language="text")
+                        st.write(f"Actif depuis le : `{cert_dict.get('notBefore')}`")
+                        st.write(f"Expire le : `{cert_dict.get('notAfter')}`")
                         
                 except Exception as e:
                     st.error(f"❌ Impossible d'établir la connexion ou de récupérer le certificat : {e}")
                     st.info("💡 Vérifiez que votre ordinateur est bien connecté à Internet et que le nom de domaine est correct.")
 
     with col_right:
-        st.markdown('<h3 class="section-header">🛡️ Comment obtenir un \"Vrai HTTPS\" local sans avertissement ?</h3>', unsafe_allow_html=True)
+        st.markdown('<h3 class="section-header">🛡️ Architecture de Sécurité Applicative</h3>', unsafe_allow_html=True)
         st.write(
-            "Lorsque vous visitez `https://localhost:8443` sur votre navigateur, une alerte rouge de sécurité s'affiche. "
-            "C'est parce que votre système d'exploitation ne connaît pas votre **Root CA locale** personnalisée (votre ancre de confiance)."
+            "Le laboratoire cryptographique **Corvus Drop** a été entièrement ré-architecturé **FROM SCRATCH**."
         )
         st.write(
-            "Pour avoir un **Vrai HTTPS sécurisé (cadenas vert) localement**, vous devez importer le certificat "
-            "de votre Root CA dans le magasin d'autorités de certification de confiance de votre système."
+            "Toutes les primitives mathématiques (chiffrement symétrique par flux ChaCha20, arithmétique modulaire "
+            "sur courbes elliptiques NIST P-256 et signatures ECDSA) ont été recodées en pur Python sans faire appel "
+            "à des bibliothèques système binaires (ex: OpenSSL, rust-cryptography)."
         )
-        
-        st.markdown("##### 💻 Méthode Windows automatique (PowerShell en un clic) :")
-        st.write("Exécutez cette commande simple dans un terminal PowerShell lancé **en tant qu'Administrateur** :")
-        
-        st.code(
-            f'Import-Certificate -FilePath "{os.path.abspath(CA_CERT_PATH)}" -CertStoreLocation Cert:\\LocalMachine\\Root',
-            language="powershell"
-        )
-        
-        st.markdown("##### 🦊 Méthode pour Mozilla Firefox :")
-        st.write(
-            "Firefox n'utilise pas le magasin Windows. Pour l'ajouter sur Firefox :\n"
-            "1. Allez dans **Paramètres** -> **Vie privée et sécurité**.\n"
-            "2. Faites défiler tout en bas et cliquez sur **Afficher les certificats**.\n"
-            "3. Dans l'onglet **Autorités**, cliquez sur **Importer**.\n"
-            "4. Sélectionnez le fichier `ca_cert.pem` et cochez la case *'Confirmer cette CA pour identifier des sites web'*."
-        )
-        
-        st.markdown("##### 🔒 Résultat :")
         st.success(
-            "Une fois le certificat importé, relancez votre navigateur et allez sur `https://localhost:8443/download/test` : "
-            "l'avertissement aura complètement disparu et vous aurez un **cadenas vert sécurisé parfait**, identique à un site professionnel !"
+            "🔒 **Résultat :** Vous disposez d'un système autonome, robuste et parfaitement transparent au niveau de sa logique mathématique !"
         )
         
     st.markdown('</div>', unsafe_allow_html=True)
@@ -418,66 +286,50 @@ with tab_pki:
     st.markdown('<h3 class="section-header">📜 Simulateur de Système de Certification ECC</h3>', unsafe_allow_html=True)
     st.write(
         "Ce module simule une Autorité de Certification (CA) complète basée sur la "
-        "cryptographie sur les courbes elliptiques (ECC). Générez votre Root CA et signez des certificats."
+        "cryptographie sur les courbes elliptiques (ECC) codée de A à Z. Générez votre Root CA et signez des certificats."
     )
     
     col_left, col_right = st.columns(2)
     
     with col_left:
         st.markdown("#### 1️⃣ Initialiser une Root CA ECC")
-        curve_name = st.selectbox(
-            "Choisir la courbe Elliptique (ECC)",
-            ["SECP384R1 (NIST P-384)", "SECP256R1 (NIST P-256)", "SECP521R1 (NIST P-521)"],
-            key="curve_choice_pki"
-        )
         ca_cn = st.text_input("Nom Commun de la CA (Common Name)", value="Local ECC Root CA", key="ca_cn_input")
         ca_org = st.text_input("Organisation (O)", value="My Security Laboratory", key="ca_org_input")
-        ca_country = st.text_input("Pays (C)", value="FR", max_chars=2, key="ca_c_input")
         ca_days = st.number_input("Validité de la Root CA (jours)", value=365, min_value=1, key="ca_validity_input")
-        ca_password = st.text_input("Définir un mot de passe fort pour la Root CA", type="password", key="ca_password_setup_pki", help="Utilisé pour chiffrer la clé privée de l'autorité racine via KDF.")
+        ca_password = st.text_input("Définir un mot de passe fort pour la Root CA", type="password", key="ca_password_setup_pki", help="Utilisé pour chiffrer la clé privée de l'autorité racine via KDF robust.")
         
         if st.button("✨ Générer la Root CA", key="gen_root_ca_btn"):
             if len(ca_password) < 8:
-                st.error("❌ Erreur : Le mot de passe de la Root CA doit faire au moins 8 caractères pour être sécurisé via KDF !")
+                st.error("❌ Erreur : Le mot de passe de la Root CA doit faire au moins 8 caractères !")
             else:
                 try:
-                    selected_curve = get_curve_by_name(curve_name)
-                    ca_priv = generate_ecc_private_key(selected_curve)
-                    ca_cert = generate_root_ca_ecc(
-                        ca_priv, ca_country, "IDF", "Paris", ca_org, ca_cn, ca_days
-                    )
+                    ca_priv = generate_ecc_private_key()
+                    ca_cert_pem = generate_root_ca_ecc(ca_priv, ca_cn, ca_days)
+                    ca_priv_pem = serialize_custom_private_key(ca_priv, ca_password)
                     
-                    password_bytes = ca_password.encode("utf-8")
-                    ca_priv_pem = ca_priv.private_bytes(
-                        encoding=serialization.Encoding.PEM,
-                        format=serialization.PrivateFormat.PKCS8,
-                        encryption_algorithm=serialization.BestAvailableEncryption(password_bytes)
-                    )
-                ca_cert_pem = ca_cert.public_bytes(serialization.Encoding.PEM)
-                
-                with open("ca_private_key.pem", "wb") as f:
-                    f.write(ca_priv_pem)
-                with open("ca_cert.pem", "wb") as f:
-                    f.write(ca_cert_pem)
-                
-                # Copie automatique dans le dossier serveur si présent
-                server_dir = os.path.join("..", "server")
-                if os.path.exists(server_dir):
-                    with open(os.path.join(server_dir, "ca_private_key.pem"), "wb") as f:
+                    with open("ca_private_key.pem", "w", encoding="utf-8") as f:
                         f.write(ca_priv_pem)
-                    with open(os.path.join(server_dir, "ca_cert.pem"), "wb") as f:
+                    with open("ca_cert.pem", "w", encoding="utf-8") as f:
                         f.write(ca_cert_pem)
                     
-                st.success("🎉 Root CA ECC générée et sauvegardée localement (ca_private_key.pem, ca_cert.pem) !")
-            except Exception as e:
-                st.error(f"Erreur de génération : {e}")
+                    # Copie automatique dans le dossier serveur si présent
+                    server_dir = os.path.join("..", "server")
+                    if os.path.exists(server_dir):
+                        with open(os.path.join(server_dir, "ca_private_key.pem"), "w", encoding="utf-8") as f:
+                            f.write(ca_priv_pem)
+                        with open(os.path.join(server_dir, "ca_cert.pem"), "w", encoding="utf-8") as f:
+                            f.write(ca_cert_pem)
+                        
+                    st.success("🎉 Root CA ECC générée et sauvegardée localement (ca_private_key.pem, ca_cert.pem) !")
+                except Exception as e:
+                    st.error(f"Erreur de génération : {e}")
 
     with col_right:
         st.markdown("#### 2️⃣ Émettre et signer un Certificat Serveur")
         st.write("Génère une clé serveur ECC et crée un certificat signé par la Root CA locale active.")
-        server_cn = st.text_input("Common Name du Serveur (ex: localhost ou 127.0.0.1)", value="localhost", key="serv_cn_input")
+        server_cn = st.text_input("Common Name du Serveur", value="localhost", key="serv_cn_input")
         server_days = st.number_input("Validité du Certificat Serveur (jours)", value=30, min_value=1, key="serv_days_input")
-        ca_decrypt_password = st.text_input("Saisir le mot de passe de la Root CA active", type="password", key="ca_password_decrypt_pki", help="Nécessaire pour déverrouiller la clé privée de la CA et signer le certificat serveur.")
+        ca_decrypt_password = st.text_input("Saisir le mot de passe de la Root CA active", type="password", key="ca_password_decrypt_pki", help="Nécessaire pour déverrouiller la clé privée de la CA et signer.")
         
         if st.button("✍️ Signer le Certificat Serveur", key="sign_serv_cert_btn"):
             if not os.path.exists("ca_cert.pem") or not os.path.exists("ca_private_key.pem"):
@@ -486,37 +338,29 @@ with tab_pki:
                 st.error("❌ Erreur : Veuillez entrer le mot de passe pour déverrouiller la Root CA active !")
             else:
                 try:
-                    with open("ca_private_key.pem", "rb") as f:
-                        password_bytes = ca_decrypt_password.encode("utf-8")
-                        ca_priv = serialization.load_pem_private_key(f.read(), password=password_bytes)
-                    with open("ca_cert.pem", "rb") as f:
-                        ca_cert = x509.load_pem_x509_certificate(f.read())
+                    with open("ca_private_key.pem", "r", encoding="utf-8") as f:
+                        ca_priv = deserialize_custom_private_key(f.read(), password=ca_decrypt_password)
+                    with open("ca_cert.pem", "r", encoding="utf-8") as f:
+                        ca_cert_pem = f.read()
                         
-                    curve_object = ca_priv.curve
-                    server_priv = generate_ecc_private_key(curve_object)
-                    
-                    server_cert = generate_and_sign_server_cert_ecc(
-                        server_priv, ca_cert, ca_priv, server_cn, server_days
+                    server_priv = generate_ecc_private_key()
+                    server_cert_pem = generate_and_sign_server_cert_ecc(
+                        server_priv, ca_cert_pem, ca_priv, server_cn, server_days
                     )
                     
-                    server_priv_pem = server_priv.private_bytes(
-                        encoding=serialization.Encoding.PEM,
-                        format=serialization.PrivateFormat.PKCS8,
-                        encryption_algorithm=serialization.NoEncryption()
-                    )
-                    server_cert_pem = server_cert.public_bytes(serialization.Encoding.PEM)
+                    server_priv_pem = serialize_custom_private_key(server_priv)
                     
-                    with open("server_private_key.pem", "wb") as f:
+                    with open("server_private_key.pem", "w", encoding="utf-8") as f:
                         f.write(server_priv_pem)
-                    with open("server_cert.pem", "wb") as f:
+                    with open("server_cert.pem", "w", encoding="utf-8") as f:
                         f.write(server_cert_pem)
                     
                     # Copie automatique dans le dossier serveur si présent
                     server_dir = os.path.join("..", "server")
                     if os.path.exists(server_dir):
-                        with open(os.path.join(server_dir, "server_private_key.pem"), "wb") as f:
+                        with open(os.path.join(server_dir, "server_private_key.pem"), "w", encoding="utf-8") as f:
                             f.write(server_priv_pem)
-                        with open(os.path.join(server_dir, "server_cert.pem"), "wb") as f:
+                        with open(os.path.join(server_dir, "server_cert.pem"), "w", encoding="utf-8") as f:
                             f.write(server_cert_pem)
                         
                     st.success("🎉 Certificat Serveur signé avec succès ! Fichiers sauvegardés (server_private_key.pem, server_cert.pem)")
@@ -524,47 +368,34 @@ with tab_pki:
                     st.error(f"Erreur de signature : {e}")
                     
     st.markdown("---")
-    st.markdown('<h3 class="section-header">🔍 Inspecteur de Certificat X.509</h3>', unsafe_allow_html=True)
-    st.write("Glissez-déposez n'importe quel certificat PEM (.pem ou .crt) pour analyser visuellement son contenu cryptographique.")
+    st.markdown('<h3 class="section-header">🔍 Inspecteur de Certificat Customisé FROM SCRATCH</h3>', unsafe_allow_html=True)
+    st.write("Glissez-déposez n'importe quel certificat PEM customisé généré par notre PKI pour analyser visuellement son contenu.")
     
-    uploaded_cert_file = st.file_uploader("Importer un certificat X.509", type=["pem", "crt", "der"], key="cert_upl_inspector")
+    uploaded_cert_file = st.file_uploader("Importer un certificat customisé", type=["pem", "crt"], key="cert_upl_inspector")
     
     if uploaded_cert_file is not None:
         try:
-            cert_data = uploaded_cert_file.read()
-            cert_obj = x509.load_pem_x509_certificate(cert_data)
+            cert_pem = uploaded_cert_file.read().decode("utf-8")
+            lines = cert_pem.strip().split("\n")
+            body_json = "".join([l for l in lines if not l.startswith("-----")])
+            cert_obj = json.loads(body_json)
             
             st.success("Analyse réussie !")
             
             c1, c2 = st.columns(2)
             with c1:
-                st.markdown("**📋 Sujet (Subject) :**")
-                st.code(str(cert_obj.subject))
-                st.markdown("**✍️ Émetteur (Issuer) :**")
-                st.code(str(cert_obj.issuer))
-                st.markdown("**🔢 Numéro de série :**")
-                st.code(str(cert_obj.serial_number))
-                st.markdown("**⌛ Dates de validité :**")
-                st.write(f"Début : `{cert_obj.not_valid_before_utc}`")
-                st.write(f"Fin : `{cert_obj.not_valid_after_utc}`")
+                st.markdown("**📋 Sujet (Subject CN) :**")
+                st.code(cert_obj["subject"]["CN"])
+                st.markdown("**✍️ Émetteur (Issuer CN) :**")
+                st.code(cert_obj["issuer"]["CN"])
+                st.markdown("**⌛ Dates de validité (jours) :**")
+                st.write(f"Durée : `{cert_obj['validity']['days']} jours`")
                 
             with c2:
-                pub_key = cert_obj.public_key()
-                st.markdown("**🔑 Clé Publique Asymétrique :**")
-                if isinstance(pub_key, ec.EllipticCurvePublicKey):
-                    st.info(f"🟢 Type : Courbe Elliptique (ECC)")
-                    st.write(f"Nom de la courbe : `{pub_key.curve.name}`")
-                    st.write(f"Taille de la clé : `{pub_key.key_size} bits`")
-                    st.markdown("**📍 Coordonnées du Point Public (X, Y) :**")
-                    numbers = pub_key.public_numbers()
-                    st.code(f"X: {hex(numbers.x)}\nY: {hex(numbers.y)}", language="text")
-                else:
-                    st.warning("Type : RSA ou autre algorithme non-ECC")
-                    st.write(f"Taille de la clé : `{pub_key.key_size} bits`")
-                    
-                st.markdown("**🛡️ Signature du Certificat :**")
-                st.write(f"Algorithme de hachage : `{cert_obj.signature_hash_algorithm.name}`")
-                st.code(f"Signature hex : {cert_obj.signature.hex()[:100]}...", language="text")
+                st.markdown("**🔑 Clé Publique Asymétrique ECC NIST P-256 :**")
+                st.code(f"Point Public X: {cert_obj['public_key']['x']}\nPoint Public Y: {cert_obj['public_key']['y']}", language="text")
+                st.markdown("**✍️ Signature Numérique ECDSA (r, s) :**")
+                st.code(f"r: {cert_obj['signature']['r']}\ns: {cert_obj['signature']['s']}", language="text")
         except Exception as e:
             st.error(f"Impossible de parser le certificat : {e}")
             
@@ -628,7 +459,7 @@ with tab_upload:
     if not key_configured:
         st.warning("⚠️ Veuillez d'abord configurer ou générer une clé symétrique dans l'onglet 'Gestion des Clés Symétriques' avant de chiffrer vos fichiers.")
     else:
-        st.write("Sélectionnez un fichier en clair. Le chiffrement s'effectue en mémoire avant d'être téléversé sur le serveur via HTTPS.")
+        st.write("Sélectionnez un fichier en clair. Le chiffrement s'effectue en mémoire avant d'être téléversé sur le serveur via HTTP.")
         
         uploaded_file = st.file_uploader("Sélectionner un fichier local", type=None, key="file_upl_pki")
         
@@ -639,7 +470,7 @@ with tab_upload:
             
             if st.button("🔒 Chiffrer et Téléverser", key="encrypt_and_upl_btn_pki"):
                 try:
-                    with st.spinner("Chiffrement ChaCha20 en mémoire et téléversement HTTPS..."):
+                    with st.spinner("Chiffrement ChaCha20 en mémoire et téléversement HTTP..."):
                         key = st.session_state["chacha_key"]
                         encrypted_payload = encrypt_in_memory(file_bytes, key)
                         encrypted_filename = f"{original_filename}.enc"
@@ -650,17 +481,13 @@ with tab_upload:
                         
                         response = requests.post(
                             f"{SERVER_URL}/upload",
-                            files=files,
-                            verify=CA_CERT_PATH
+                            files=files
                         )
                         response.raise_for_status()
                         
                         st.success(f"🎉 Succès ! Le fichier a été chiffré et téléversé.")
                         st.json(response.json())
                         
-                except requests.exceptions.SSLError as ssl_err:
-                    st.error("❌ Erreur TLS/SSL : Impossible de valider l'identité du serveur.")
-                    st.write(f"Détail : {ssl_err}")
                 except Exception as e:
                     st.error(f"❌ Une erreur s'est produite lors de l'opération : {e}")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -669,7 +496,7 @@ with tab_upload:
 # ================= ONGLET 5 : RECEVOIR UN FICHIER =================
 with tab_download:
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.subheader("Téléchargement HTTPS & Déchiffrement ChaCha20")
+    st.subheader("Téléchargement HTTP & Déchiffrement ChaCha20")
     
     key_configured = st.session_state["chacha_key"] is not None
     
@@ -691,8 +518,7 @@ with tab_download:
                 try:
                     with st.spinner("Téléchargement sécurisé et déchiffrement en cours..."):
                         response = requests.get(
-                            f"{SERVER_URL}/download/{file_to_download.strip()}",
-                            verify=CA_CERT_PATH
+                            f"{SERVER_URL}/download/{file_to_download.strip()}"
                         )
                         response.raise_for_status()
                         

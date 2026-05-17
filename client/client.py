@@ -26,12 +26,11 @@ Auteur: Développeur Python expert en Cryptographie
 
 import os
 import requests
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from custom_crypto import chacha20_encrypt, chacha20_decrypt
 
 # Configuration du client
-SERVER_URL = "https://localhost:8443"
-CA_CERT_PATH = "ca_cert.pem"  # Certificat de la CA racine pour valider le serveur HTTPS
-NONCE_SIZE = 16  # Taille du nonce ChaCha20 (16 octets / 128 bits)
+SERVER_URL = "http://localhost:8080"
+NONCE_SIZE = 12  # Taille du nonce ChaCha20 IETF (12 octets / 96 bits)
 KEY_SIZE = 32    # Taille de la clé ChaCha20 (32 octets / 256 bits)
 
 
@@ -49,7 +48,7 @@ def chiffrer_fichier(chemin_source: str, chemin_destination: str, cle: bytes) ->
     Chiffre le contenu d'un fichier avec l'algorithme ChaCha20.
     
     Format du fichier de sortie :
-    [ Nonce (16 octets) ] + [ Données chiffrées (Taille variable) ]
+    [ Nonce (12 octets) ] + [ Données chiffrées (Taille variable) ]
     """
     if not os.path.exists(chemin_source):
         raise FileNotFoundError(f"Le fichier source {chemin_source} n'existe pas.")
@@ -60,41 +59,32 @@ def chiffrer_fichier(chemin_source: str, chemin_destination: str, cle: bytes) ->
     with open(chemin_source, "rb") as f:
         donnees_claires = f.read()
 
-    # 2. Générer un nonce (IV) aléatoire de 16 octets
+    # 2. Générer un nonce (IV) aléatoire de 12 octets
     # Il est impératif que ce nonce soit unique pour chaque opération de chiffrement !
     nonce = os.urandom(NONCE_SIZE)
 
-    # 3. Initialiser l'algorithme ChaCha20 avec la clé et le nonce
-    algorithme = algorithms.ChaCha20(cle, nonce)
-    chiffreur = Cipher(algorithme, mode=None).encryptor()
+    # 3. Chiffrer les données via notre ChaCha20 custom
+    donnees_chiffrees = chacha20_encrypt(donnees_claires, cle, nonce)
 
-    # 4. Chiffrer les données
-    donnees_chiffrees = chiffreur.update(donnees_claires) + chiffreur.finalize()
-
-    # 5. Sauvegarder : Nonce (16 octets) + Données chiffrées
+    # 4. Sauvegarder : Nonce (12 octets) + Données chiffrées
     with open(chemin_destination, "wb") as f:
         f.write(nonce)
         f.write(donnees_chiffrees)
 
     print(f"[OK] Fichier chiffré sauvegardé sous '{chemin_destination}' (Taille : {os.path.getsize(chemin_destination)} octets)")
-
-
+ 
+ 
 def upload_fichier(chemin_chiffre: str) -> str:
     """
-    Téléverse le fichier chiffré (.enc) sur le serveur FastAPI sécurisé (HTTPS).
-    Valide l'identité du serveur en utilisant le certificat Root CA (ca_cert.pem).
+    Téléverse le fichier chiffré (.enc) sur le serveur FastAPI.
     """
     if not os.path.exists(chemin_chiffre):
         raise FileNotFoundError(f"Le fichier chiffré {chemin_chiffre} n'existe pas.")
 
-    if not os.path.exists(CA_CERT_PATH):
-        raise FileNotFoundError(f"Le certificat CA requis '{CA_CERT_PATH}' est introuvable. "
-                                "Veuillez d'abord initialiser la PKI locale.")
-
     url_upload = f"{SERVER_URL}/upload"
     nom_fichier = os.path.basename(chemin_chiffre)
 
-    print(f"[+] Téléversement sécurisé de '{nom_fichier}' vers {url_upload}...")
+    print(f"[+] Téléversement de '{nom_fichier}' vers {url_upload}...")
 
     # Préparation des fichiers pour la requête multipart/form-data
     files = {
@@ -102,11 +92,10 @@ def upload_fichier(chemin_chiffre: str) -> str:
     }
 
     try:
-        # Envoi de la requête POST HTTPS avec validation stricte du certificat via verify=CA_CERT_PATH
+        # Envoi de la requête POST HTTP standard
         reponse = requests.post(
             url_upload,
-            files=files,
-            verify=CA_CERT_PATH
+            files=files
         )
         
         # Fermeture propre du fichier téléversé
@@ -119,29 +108,22 @@ def upload_fichier(chemin_chiffre: str) -> str:
         print(f"    Réponse du serveur : {reponse.json()}")
         return nom_fichier
 
-    except requests.exceptions.SSLError as ssl_err:
-        print(f"[!] Erreur de validation TLS/SSL : {ssl_err}")
-        print("    Vérifiez que le serveur FastAPI utilise bien un certificat signé par la Root CA générée.")
-        raise
     except requests.exceptions.RequestException as req_err:
         print(f"[!] Erreur de communication réseau : {req_err}")
         raise
-
-
+ 
+ 
 def telecharger_et_dechiffrer(nom_fichier_enc: str, chemin_restaure: str, cle: bytes) -> None:
     """
     Télécharge un fichier chiffré depuis le serveur FastAPI et le déchiffre localement.
-    Extrait le nonce de 16 octets présent au début avant d'opérer le déchiffrement ChaCha20.
+    Extrait le nonce de 12 octets présent au début avant d'opérer le déchiffrement ChaCha20.
     """
-    if not os.path.exists(CA_CERT_PATH):
-        raise FileNotFoundError(f"Le certificat CA requis '{CA_CERT_PATH}' est introuvable.")
-
     url_download = f"{SERVER_URL}/download/{nom_fichier_enc}"
-    print(f"[+] Téléchargement sécurisé de '{nom_fichier_enc}' depuis {url_download}...")
+    print(f"[+] Téléchargement de '{nom_fichier_enc}' depuis {url_download}...")
 
     try:
-        # Requête GET HTTPS avec vérification TLS
-        reponse = requests.get(url_download, verify=CA_CERT_PATH)
+        # Requête GET HTTP standard
+        reponse = requests.get(url_download)
         reponse.raise_for_status()
 
         contenu_binaire = reponse.content
@@ -152,20 +134,16 @@ def telecharger_et_dechiffrer(nom_fichier_enc: str, chemin_restaure: str, cle: b
 
         print(f"[+] Fichier reçu ({taille_contenu} octets). Déchiffrement en cours...")
 
-        # 1. Extraire le nonce (les 16 premiers octets)
+        # 1. Extraire le nonce (les 12 premiers octets)
         nonce = contenu_binaire[:NONCE_SIZE]
         
         # 2. Extraire le reste (les données chiffrées)
         donnees_chiffrees = contenu_binaire[NONCE_SIZE:]
 
-        # 3. Initialiser le déchiffreur ChaCha20 avec la clé en mémoire et le nonce extrait
-        algorithme = algorithms.ChaCha20(cle, nonce)
-        dechiffreur = Cipher(algorithme, mode=None).decryptor()
+        # 3. Déchiffrer via notre ChaCha20 custom
+        donnees_claires = chacha20_decrypt(donnees_chiffrees, cle, nonce)
 
-        # 4. Déchiffrer les données
-        donnees_claires = dechiffreur.update(donnees_chiffrees) + dechiffreur.finalize()
-
-        # 5. Sauvegarder le fichier restauré
+        # 4. Sauvegarder le fichier restauré
         with open(chemin_restaure, "wb") as f:
             f.write(donnees_claires)
 
@@ -181,7 +159,7 @@ def telecharger_et_dechiffrer(nom_fichier_enc: str, chemin_restaure: str, cle: b
 
 if __name__ == "__main__":
     print("=" * 70)
-    print("      CLIENT SECURISE (HOST A) - CHA-CHA20 & TLS VALIDATION")
+    print("      CLIENT SECURISE (HOST A) - CHA-CHA20 & PKI SIMULATION")
     print("=" * 70)
 
     # 1. Génération de la clé symétrique en mémoire

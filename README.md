@@ -1,135 +1,113 @@
-# 🛡️ Corvus Drop
+# 🛡️ Corvus Drop - Laboratoire de Cryptographie FROM SCRATCH
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688.svg)](https://fastapi.tiangolo.com/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.25%2B-FF4B4B.svg)](https://streamlit.io/)
-[![Cryptography](https://img.shields.io/badge/Cryptography-ECC_&_ChaCha20-orange.svg)](https://cryptography.io/)
+[![Cryptography](https://img.shields.io/badge/Cryptography-100%25_From_Scratch-success.svg)](#)
+
 ## ℹ️ À Propos du Projet
 
-**Corvus Drop** est un laboratoire et un système d'échange de fichiers chiffrés de bout en bout (E2EE) à haute sécurité. L'objectif de ce projet est de concevoir un canal de transfert ultra-sécurisé combinant les meilleures primitives cryptographiques modernes tout en offrant une interface interactive didactique pour l'analyse et la compréhension des protocoles de sécurité.
+**Corvus Drop** est un laboratoire et un système d'échange de fichiers sécurisés de bout en bout (E2EE) entièrement codé **from scratch** en pur Python. 
 
-### 🎯 Pourquoi "Corvus Drop" ?
-Dans la nature, les corvidés (Corvus) sont réputés pour leur intelligence exceptionnelle, leur mémoire et leur habileté à cacher ou stocker des objets précieux en toute sécurité. **Corvus Drop** incarne cette philosophie : un système agile et robuste capable de chiffrer, transférer et masquer des fichiers confidentiels à l'aide de verrous cryptographiques inviolables.
-
-### 🛡️ Primitives Cryptographiques de Pointe :
-* **Symétrique (ChaCha20)** : Un chiffrement par flux moderne de 256 bits, plus rapide que AES sur la plupart des processeurs, et intrinsèquement résistant aux attaques par canaux auxiliaires (Side-Channel).
-* **Asymétrique (ECC SECP384R1)** : Une courbe elliptique de niveau militaire recommandée par l'ANSSI pour garantir la robustesse de l'infrastructure de clés (PKI).
-* **Dérivation de Clé (KDF - PBKDF2)** : Une fonction de dérivation robuste utilisée pour transformer vos mots de passe en clés de chiffrement de haute sécurité pour protéger la Root CA.
-* **Transport (TLS / HTTPS)** : Garantit la confidentialité du canal, la prévention des attaques de l'homme du milieu (MitM) et la validation d'identité par certificat X.509.
+Afin de répondre à une exigence académique et d'ingénierie stricte, **aucune bibliothèque cryptographique prédéfinie** (telle que `cryptography`, `PyCryptodome`, `pyOpenSSL`, etc.) n'est utilisée. Toutes les structures de données, les algorithmes de chiffrement symétrique par flux, l'arithmétique modulaire sur les courbes elliptiques et les signatures numériques sont écrits et exécutés au niveau applicatif à partir des principes mathématiques fondamentaux.
 
 ---
 
 ## 📂 Structure du Projet
 
-Le projet est divisé en deux composants isolés et autonomes, chacun disposant de ses propres responsabilités :
+Le projet est divisé en deux sections autonomes représentant les deux hôtes communicants :
 
 ```text
 Corvus Drop/
 ├── 📂 client/              # --- CÔTÉ CLIENT (Host A) ---
-│   ├── client.py           # Script client CLI de test (chiffrement & upload)
+│   ├── client.py           # Script client CLI de simulation E2EE & upload
 │   ├── interface.py        # Interface premium Streamlit (ECC Lab & Inspecteur HTTPS)
-│   └── ca_cert.pem         # Certificat de confiance de la Root CA (généré)
+│   ├── custom_crypto.py    # Moteur de calcul cryptographique autonome (Host A)
+│   └── ca_cert.pem         # Copie du certificat de confiance de la Root CA (généré)
 │
 └── 📂 server/              # --- CÔTÉ SERVEUR (Host B) ---
-    ├── server.py           # Serveur FastAPI HTTPS Premium
-    ├── pki_setup.py        # Initialisateur de la PKI locale
-    ├── ca_cert.pem         # Certificat public de la Root CA (généré)
-    ├── ca_private_key.pem  # Clé privée Root CA (généré)
-    ├── server_cert.pem     # Certificat TLS serveur (généré)
-    ├── server_private_key.pem          # Clé privée TLS serveur (généré)
+    ├── server.py           # Serveur FastAPI d'échange de fichiers (HTTP port 8080)
+    ├── pki_setup.py        # Script d'initialisation de la PKI customisée
+    ├── custom_crypto.py    # Moteur de calcul cryptographique autonome (Host B)
+    ├── ca_cert.pem         # Certificat de la Root CA (généré)
+    ├── ca_private_key.pem  # Clé privée Root CA chiffrée par KDF (générée)
+    ├── server_cert.pem     # Certificat du serveur signé par ECDSA custom (généré)
+    ├── server_private_key.pem # Clé privée asymétrique du serveur (générée)
     └── 📂 server_storage/  # Coffre-fort de stockage sécurisé du serveur
 ```
 
 ---
 
-## ⚙️ Cryptographie & Sécurité
+## ⚙️ Spécifications Cryptographiques Mathématiques
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Client as 💻 Client (Host A)
-    actor CA as 📜 Autorité de Certification (Root CA)
-    actor Serveur as 🛡️ Serveur FastAPI (Host B)
+### 1. Chiffrement Symétrique : ChaCha20 From Scratch
+L'algorithme de chiffrement symétrique par flux **ChaCha20** (RFC 7539) est implémenté de bout en bout :
+* **Matrice d'État (64 octets)** : Composée de 4 constantes prédéfinies, de la clé symétrique de 32 octets (256 bits), d'un compteur de bloc de 4 octets et d'un nonce de 12 octets (96 bits).
+* **Quart de Ronde (Quarter-Round)** : Opérations arithmétiques pures sur des registres de 32 bits basées sur l'addition modulo $2^{32}$, le OU exclusif (XOR) et les rotations binaires vers la gauche ($<<< 16$, $<<< 12$, $<<< 8$, $<<< 7$).
+* **Rondes de Chiffrement** : 20 rondes alternant les colonnes et les diagonales pour assurer une diffusion et une confusion parfaites.
 
-    Note over CA: Étape 1 : Initialisation PKI
-    CA->>Serveur: Émet le certificat TLS (server_cert.pem)
-    CA->>Client: Copie le certificat Root (ca_cert.pem)
+### 2. Cryptographie Asymétrique : ECC (NIST P-256)
+L'infrastructure à clés publiques (PKI) repose sur la courbe elliptique standard **NIST P-256** ($y^2 = x^3 - 3x + b \pmod P$) implémentée avec :
+* **Addition de Points** et **Doublement de Points** gérant le point à l'infini.
+* **Multiplication Scalaire** (méthode Double-and-Add) pour calculer le produit $Q = d \cdot G$ en temps logarithmique stable.
+* **Paramètres NIST P-256** codés en dur avec une précision exacte (Modulo premier $P$, Ordre du sous-groupe $N$, Générateur de base $G(x, y)$).
 
-    Note over Client: Étape 2 : Chiffrement Local
-    Client->>Client: Génère une clé symétrique ChaCha20 (256 bits)
-    Client->>Client: Chiffre le document (nonce 16 octets + data)
+### 3. Signatures Numériques : ECDSA Customisé
+Les certificats sont signés numériquement en générant un couple de valeurs $(r, s)$ :
+* Calcul du condensat cryptographique via un algorithme de hachage SHA-256.
+* Choix d'un nonce éphémère aléatoire $k \in [1, N-1]$.
+* Calcul du point de courbe $R = k \cdot G = (x_1, y_1)$ et définition de $r = x_1 \pmod N$.
+* Calcul de $s = k^{-1} \cdot (Hash(Msg) + d \cdot r) \pmod N$.
+* La vérification du certificat s'effectue en validant que le point $U = (Hash(Msg) \cdot s^{-1}) \cdot G + (r \cdot s^{-1}) \cdot Q$ a pour abscisse $x_u$ tel que $x_u \pmod N == r$.
 
-    Note over Client, Serveur: Étape 3 : Téléversement HTTPS/TLS
-    Client->>Serveur: POST /upload (Fichier chiffré + Validation TLS via ca_cert)
-    Serveur->>Serveur: Stocke le fichier chiffré dans server_storage/
-
-    Note over Serveur, Client: Étape 4 : Récupération & Déchiffrement
-    Client->>Serveur: GET /download/{file.enc}
-    Serveur->>Client: Transmet le fichier chiffré (.enc)
-    Client->>Client: Extrait le nonce de 16 octets & déchiffre en mémoire
-    Note over Client: Résultat : Fichier restauré à l'identique !
-```
+### 4. KDF & Sécurisation de Clé (PBKDF2-HMAC-SHA256)
+Pour se conformer aux standards de haute sécurité, les clés privées d'autorité racine sont chiffrées sur le disque :
+* **Dérivation (KDF)** : Implémentation du standard PBKDF2 avec HMAC-SHA256 pour dériver une clé forte de 256 bits à partir d'un mot de passe utilisateur et d'un sel aléatoire de 16 octets (1000 itérations).
+* **Chiffrement** : La clé ECC privée dérivée est stockée au format PEM chiffrée par le flux ChaCha20.
 
 ---
 
 ## 🛠️ Guide de Démarrage & Protocole de Test
 
-Suivez ces étapes pour configurer et tester l'ensemble du projet localement.
-
 ### 📋 Prérequis
-Installez les dépendances Python requises :
+Installez les bibliothèques minimales nécessaires pour le serveur API et l'interface utilisateur Streamlit :
 ```bash
-pip install fastapi uvicorn requests streamlit cryptography
+pip install fastapi uvicorn requests streamlit
 ```
 
 ---
 
-### Étape 1 : Initialiser la PKI Locale
-Avant de pouvoir lancer le serveur web sécurisé, vous devez initialiser votre autorité de certification (CA) et générer les certificats de chiffrement :
+### Étape 1 : Initialiser la PKI Customisée
+Avant de démarrer le serveur, vous devez générer vos autorités de confiance et les clés d'échange :
 
-1. Ouvrez un terminal et accédez au dossier `server/` :
+1. Ouvrez un terminal et placez-vous dans le dossier `server/` :
    ```bash
    cd server
    ```
-2. Lancez le script de la PKI :
+2. Exécutez le script d'initialisation :
    ```bash
    python pki_setup.py
    ```
 
 > [!IMPORTANT]
-> **Sécurisation par KDF :** Lors de l'initialisation, le script vous demandera de définir et confirmer un **mot de passe d'autorité robuste** (minimum 8 caractères). La clé privée de la CA (`ca_private_key.pem`) sera alors chiffrée de manière sécurisée en format PKCS#8 via un algorithme de dérivation de clé (KDF) robuste (PBKDF2/scrypt).
-
-> [!NOTE]
-> **Fonctionnement "Smart Sync" :** Ce script crée une clé privée CA racine unique et génère un certificat serveur signé avec Subject Alternative Names (SAN) pour autoriser les connexions locales. Le script **copie automatiquement** la clé publique `ca_cert.pem` dans le dossier `client/` pour le client TLS.
+> **Sécurisation Forte (KDF) :** Le script vous demandera de définir un mot de passe robuste (minimum 8 caractères). La clé d'autorité racine (`ca_private_key.pem`) sera alors chiffrée par KDF + ChaCha20 avant d'être écrite sur le disque.
+> Le certificat public `ca_cert.pem` est automatiquement synchronisé vers le sous-dossier `client/` pour valider la simulation PKI.
 
 ---
 
-### Étape 2 : Activer la confiance TLS locale (Cadenas Vert)
-Pour éliminer les avertissements de sécurité de votre système d'exploitation et obtenir une validation TLS parfaite :
+### Étape 2 : Lancer le Serveur API
+Le serveur stocke les fichiers cryptés et expose l'interface d'administration.
 
-* **Sous Windows (PowerShell en tant qu'Administrateur) :**
-  Accédez à la racine du projet et exécutez :
-  ```powershell
-  Import-Certificate -FilePath "client/ca_cert.pem" -CertStoreLocation Cert:\LocalMachine\Root
-  ```
-* **Pour Mozilla Firefox :**
-  Importez `client/ca_cert.pem` dans **Paramètres** -> **Vie privée et sécurité** -> **Afficher les certificats** -> **Autorités** -> **Importer**.
-
----
-
-### Étape 3 : Lancer le Serveur API HTTPS
-1. Dans votre terminal dans le dossier `server/`, lancez le serveur FastAPI :
+1. Toujours dans le dossier `server/`, lancez le serveur FastAPI :
    ```bash
    python server.py
    ```
-2. Ouvrez votre navigateur web pour accéder aux interfaces de contrôle :
-   * **Dashboard d'administration premium :** [https://localhost:8443](https://localhost:8443)
-   * **Portail API Swagger interactif :** [https://localhost:8443/docs](https://localhost:8443/docs)
+2. Le serveur s'active instantanément à l'adresse **http://127.0.0.1:8080**. Vous pouvez visualiser l'interface de contrôle web directement dans votre navigateur.
 
 ---
 
-### Étape 4 : Valider la simulation CLI (Client simple)
-Ce test vérifie le flux de chiffrement, l'upload et le déchiffrement en ligne de commande.
+### Étape 3 : Valider le Client CLI (Chiffrement et Upload)
+Ce test automatique vérifie la validité mathématique du chiffrement ChaCha20 et la connectivité réseau.
 
 1. Ouvrez un **nouveau** terminal et déplacez-vous dans le dossier `client/` :
    ```bash
@@ -139,37 +117,35 @@ Ce test vérifie le flux de chiffrement, l'upload et le déchiffrement en ligne 
    ```bash
    python client.py
    ```
-3. Appuyez sur **Entrée** lorsque le script vous le demande. 
-4. Vérifiez que la console affiche :
-   * La clé symétrique ChaCha20 générée en hexadécimal.
-   * La confirmation de la réussite du chiffrement local et de l'upload.
-   * La restauration parfaite du contenu original déchiffré depuis le fichier téléchargé.
+3. Appuyez sur **Entrée** lorsqu'il vous le demande pour envoyer le fichier. Le client effectue les opérations suivantes :
+   * Génère une clé symétrique ChaCha20 cryptographique de 256 bits.
+   * Chiffre le fichier localement en ajoutant un nonce unique de 12 octets en tête du fichier.
+   * Téléverse le fichier sur le serveur.
+   * Récupère le fichier chiffré depuis le serveur et le déchiffre à l'identique !
 
 ---
 
-### Étape 5 : Tester l'Interface Graphique Streamlit
-Le client dispose d'une interface premium complète intégrant tous nos outils cryptographiques.
+### Étape 4 : Utiliser l'Interface Graphique Streamlit
+Le client graphique premium rassemble toutes les interfaces interactives.
 
 1. Dans le dossier `client/`, lancez Streamlit :
    ```bash
    streamlit run interface.py
    ```
-2. L'application s'ouvre automatiquement à l'adresse `http://localhost:8501`.
+2. L'interface s'ouvre à l'adresse par défaut **http://localhost:8501**.
 
-#### 🧪 Scénarios de tests recommandés :
-- **Inspecteur HTTPS Réel** : Entrez `github.com` ou `google.com` dans le premier onglet. L'application effectuera un handshake TLS réel et extraira les détails cryptographiques du certificat X.509 distant (autorité de certification, validité, clés publiques asymétriques).
-- **PKI & Certificats ECC** : Utilisez le simulateur de l'onglet 2 pour créer interactivement des autorités racines et signer de nouveaux certificats serveurs.
-  * *Chiffrement KDF* : Vous devez définir un mot de passe d'autorité d'au moins 8 caractères lors de la génération de la Root CA.
-  * *Signature sécurisée* : Pour émettre et signer un certificat serveur à l'étape 2, vous devrez saisir ce même mot de passe afin de déverrouiller la clé d'autorité. Les fichiers générés sont automatiquement synchronisés avec le dossier `server/`.
-- **Coffre-fort client (ChaCha20)** :
-  1. Générez une clé symétrique de 256 bits dans l'onglet **Gestion des Clés**.
-  2. Importez un fichier local en clair dans l'onglet **Upload** puis cliquez sur **🔒 Chiffrer et Téléverser**.
-  3. Allez sur votre dashboard serveur `https://localhost:8443` pour observer le fichier chiffré `.enc` dans l'inventaire du coffre-fort.
-  4. Saisissez le nom du fichier chiffré dans l'onglet **Download** du client pour le télécharger, le déchiffrer en mémoire et le restaurer localement.
+#### 🔬 Expérimentations recommandées dans l'Interface Streamlit :
+1. **🌐 Inspecteur HTTPS Réel** : Renseignez le nom de domaine de n'importe quel grand site (ex: `google.com` ou `github.com`) dans le premier onglet. L'application établira un handshake TLS standard et analysera la validité de son certificat sans dépendances externes.
+2. **📜 PKI & Certificats ECC** :
+   * Générez une Root CA ECC en définissant un mot de passe fort (KDF activée).
+   * Émettez un certificat pour votre serveur en entrant le mot de passe défini précédemment pour déverrouiller la Root CA active (validation de signature ECDSA en temps réel !).
+   * Analysez le certificat généré via le drag-and-drop de l'**Inspecteur de Certificat customisé** pour lire les coordonnées du point elliptique et les signatures ECDSA $(r, s)$.
+3. **🔑 Gestion des Clés** : Générez ou définissez votre clé de chiffrement symétrique ChaCha20 de 256 bits.
+4. **📤 Upload / Download** : Envoyez n'importe quel document en clair, observez-le chiffré sur le tableau de bord du serveur, puis téléchargez-le et restaurez-le de manière transparente à l'aide de l'onglet de téléchargement.
 
 ---
 
-## 🛡️ Bonnes Pratiques en Production
-- Les clés privées d'autorité (`ca_private_key.pem`) sont désormais chiffrées de bout en bout par KDF avec un mot de passe fort que vous définissez de manière interactive. Conservez ce mot de passe de manière ultra-sécurisée (ex: coffre-fort de clés).
-- La clé privée du serveur (`server_private_key.pem`) est générée sans mot de passe pour permettre au serveur FastAPI de démarrer automatiquement de manière asynchrone sans intervention humaine (comportement de production standard, protégé par des permissions d'accès système strictes).
-- Restreignez toujours les droits de lecture NTFS/POSIX sur vos clés privées (permissions 600 sous Linux/Unix).
+## 🛡️ Règle de Sécurité Opérationnelle
+* **Confidentialité** : Les clés privées générées ne quittent jamais leurs dossiers respectifs.
+* **Sécurité à l'arrêt (At Rest)** : La clé privée de la Root CA est chiffrée via notre ChaCha20 avec dérivation KDF PBKDF2 de 1000 rounds.
+* **Automatisation** : La clé privée du serveur est stockée en clair sur le serveur pour permettre l'amorçage automatique (bootstrapping standard d'un serveur cloud), sécurisée par les permissions NTFS/POSIX de la machine.

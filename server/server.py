@@ -809,24 +809,14 @@ async def download_file(filename: str):
 
 if __name__ == "__main__":
     print("=" * 70)
-    print("      SERVEUR SECURISE HTTPS ACTIF (PORT 8443)")
+    print("      SERVEUR CORVUS DROP ACTIF (PORT 8080)")
+    print("      (Sécurité applicative E2EE par ChaCha20 FROM SCRATCH)")
     print("=" * 70)
 
-    # Configuration des chemins des certificats SSL/TLS
-    cert_file = "server_cert.pem"
-    key_file = "server_private_key.pem"
-
-    if not os.path.exists(cert_file) or not os.path.exists(key_file):
-        print(f"[!] ERREUR : Les certificats de test '{cert_file}' ou '{key_file}' sont introuvables.")
-        print("    Veuillez d'abord exécuter 'python pki_setup.py' pour les générer.")
-        exit(1)
-
-    # Lancement d'Uvicorn avec support SSL natif
+    # Lancement d'Uvicorn en mode HTTP standard (le canal E2EE est protégé au niveau applicatif)
     uvicorn.run(
         "server:app",
         host="127.0.0.1",
-        port=8443,
-        ssl_keyfile=key_file,
-        ssl_certfile=cert_file,
+        port=8080,
         reload=False
     )
