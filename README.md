@@ -88,6 +88,9 @@ Avant de pouvoir lancer le serveur web sécurisé, vous devez initialiser votre 
    python pki_setup.py
    ```
 
+> [!IMPORTANT]
+> **Sécurisation par KDF :** Lors de l'initialisation, le script vous demandera de définir et confirmer un **mot de passe d'autorité robuste** (minimum 8 caractères). La clé privée de la CA (`ca_private_key.pem`) sera alors chiffrée de manière sécurisée en format PKCS#8 via un algorithme de dérivation de clé (KDF) robuste (PBKDF2/scrypt).
+
 > [!NOTE]
 > **Fonctionnement "Smart Sync" :** Ce script crée une clé privée CA racine unique et génère un certificat serveur signé avec Subject Alternative Names (SAN) pour autoriser les connexions locales. Le script **copie automatiquement** la clé publique `ca_cert.pem` dans le dossier `client/` pour le client TLS.
 
@@ -147,7 +150,9 @@ Le client dispose d'une interface premium complète intégrant tous nos outils c
 
 #### 🧪 Scénarios de tests recommandés :
 - **Inspecteur HTTPS Réel** : Entrez `github.com` ou `google.com` dans le premier onglet. L'application effectuera un handshake TLS réel et extraira les détails cryptographiques du certificat X.509 distant (autorité de certification, validité, clés publiques asymétriques).
-- **PKI & Certificats ECC** : Utilisez le simulateur de l'onglet 2 pour créer interactivement des autorités racines et signer de nouveaux certificats serveurs. *Les fichiers générés sont automatiquement synchronisés avec le dossier `server/`.*
+- **PKI & Certificats ECC** : Utilisez le simulateur de l'onglet 2 pour créer interactivement des autorités racines et signer de nouveaux certificats serveurs.
+  * *Chiffrement KDF* : Vous devez définir un mot de passe d'autorité d'au moins 8 caractères lors de la génération de la Root CA.
+  * *Signature sécurisée* : Pour émettre et signer un certificat serveur à l'étape 2, vous devrez saisir ce même mot de passe afin de déverrouiller la clé d'autorité. Les fichiers générés sont automatiquement synchronisés avec le dossier `server/`.
 - **Coffre-fort client (ChaCha20)** :
   1. Générez une clé symétrique de 256 bits dans l'onglet **Gestion des Clés**.
   2. Importez un fichier local en clair dans l'onglet **Upload** puis cliquez sur **🔒 Chiffrer et Téléverser**.
@@ -157,5 +162,6 @@ Le client dispose d'une interface premium complète intégrant tous nos outils c
 ---
 
 ## 🛡️ Bonnes Pratiques en Production
-- Dans ce laboratoire, les clés privées (`*.pem`) sont générées sans mot de passe pour faciliter le test local. Dans un environnement de production, les clés d'autorité doivent être chiffrées avec un mot de passe fort via KDF.
+- Les clés privées d'autorité (`ca_private_key.pem`) sont désormais chiffrées de bout en bout par KDF avec un mot de passe fort que vous définissez de manière interactive. Conservez ce mot de passe de manière ultra-sécurisée (ex: coffre-fort de clés).
+- La clé privée du serveur (`server_private_key.pem`) est générée sans mot de passe pour permettre au serveur FastAPI de démarrer automatiquement de manière asynchrone sans intervention humaine (comportement de production standard, protégé par des permissions d'accès système strictes).
 - Restreignez toujours les droits de lecture NTFS/POSIX sur vos clés privées (permissions 600 sous Linux/Unix).
