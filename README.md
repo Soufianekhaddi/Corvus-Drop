@@ -4,10 +4,18 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688.svg)](https://fastapi.tiangolo.com/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.25%2B-FF4B4B.svg)](https://streamlit.io/)
 [![Cryptography](https://img.shields.io/badge/Cryptography-ECC_&_ChaCha20-orange.svg)](https://cryptography.io/)
+## ℹ️ À Propos du Projet
 
-**Corvus Drop** est un laboratoire et un système de transfert de fichiers chiffrés de bout en bout hautement sécurisé. Il repose sur une architecture client-serveur moderne exploitant des algorithmes de cryptographie de pointe (courbes elliptiques ECC et chiffrement symétrique ChaCha20) sécurisés par un canal de transport TLS natif.
+**Corvus Drop** est un laboratoire et un système d'échange de fichiers chiffrés de bout en bout (E2EE) à haute sécurité. L'objectif de ce projet est de concevoir un canal de transfert ultra-sécurisé combinant les meilleures primitives cryptographiques modernes tout en offrant une interface interactive didactique pour l'analyse et la compréhension des protocoles de sécurité.
 
-L'application intègre également un outil interactif d'analyse de certificats HTTPS réels pour n'importe quel nom de domaine public.
+### 🎯 Pourquoi "Corvus Drop" ?
+Dans la nature, les corvidés (Corvus) sont réputés pour leur intelligence exceptionnelle, leur mémoire et leur habileté à cacher ou stocker des objets précieux en toute sécurité. **Corvus Drop** incarne cette philosophie : un système agile et robuste capable de chiffrer, transférer et masquer des fichiers confidentiels à l'aide de verrous cryptographiques inviolables.
+
+### 🛡️ Primitives Cryptographiques de Pointe :
+* **Symétrique (ChaCha20)** : Un chiffrement par flux moderne de 256 bits, plus rapide que AES sur la plupart des processeurs, et intrinsèquement résistant aux attaques par canaux auxiliaires (Side-Channel).
+* **Asymétrique (ECC SECP384R1)** : Une courbe elliptique de niveau militaire recommandée par l'ANSSI pour garantir la robustesse de l'infrastructure de clés (PKI).
+* **Dérivation de Clé (KDF - PBKDF2)** : Une fonction de dérivation robuste utilisée pour transformer vos mots de passe en clés de chiffrement de haute sécurité pour protéger la Root CA.
+* **Transport (TLS / HTTPS)** : Garantit la confidentialité du canal, la prévention des attaques de l'homme du milieu (MitM) et la validation d'identité par certificat X.509.
 
 ---
 
